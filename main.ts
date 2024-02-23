@@ -1,9 +1,12 @@
-import { Plugin, TFile } from 'obsidian'
+import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian'
 
 export default class ExamplePlugin extends Plugin {	
 	isProcessing : boolean;
+	settings: ExamplePluginSettings;
 
 	onload() : void {
+
+		this.addSettingTab(new ExamplePluginSettingsTab(this.app, this));
 
 		this.app.workspace.on('editor-change', editor => {
 
@@ -16,23 +19,33 @@ export default class ExamplePlugin extends Plugin {
 			if(activeFile)
 			{
 				const content = editor.getDoc().getValue();
-	
-				var header = this.addOrModifyField(content, "author", /*get from settings*/ "Vladimir" );
-				header = this.addOrModifyField(content, "last_edited", /*get from settings*/ new Date().toLocaleDateString() );
 
-				if(content.startsWith(header))
+				var firstHeaderSectionIndex = content.indexOf("---");
+				var lastHeaderSectionIndex = content.indexOf("---");
+
+				var headerRecord : Record<string, string> = {};
+				if(firstHeaderSectionIndex >= 0 && lastHeaderSectionIndex >= 0)
+				{
+					const header = content.substring(firstHeaderSectionIndex, lastHeaderSectionIndex);
+					headerRecord = this.parseFrontmatterProperties(header);
+				}
+
+				if(headerRecord["author"] == "Vladimir" 
+				   && headerRecord["last_edited"] == new Date().toLocaleDateString())
 				{
 					return;
 				}
+
+				headerRecord["author"] = "Vladimir";
+				headerRecord["last_edited"] = new Date().toLocaleDateString();
 
 				this.isProcessing = true;
 				this.app.vault.process(activeFile, data => {
 					console.log("5");		
 					
-					var header = this.addOrModifyField(content, "author", /*get from settings*/ "Vladimir" );
-					header = this.addOrModifyField(content, "last_edited", /*get from settings*/ new Date().toLocaleDateString() );
+					data = this.updateFrontmatter(data, headerRecord);
 					
-					return header + data;
+					return data;
 				});
 				this.isProcessing = false;
 
@@ -45,35 +58,108 @@ export default class ExamplePlugin extends Plugin {
 
 	}
 
-	private addOrModifyField(content: string, key: string, value: string) : string {
-		
-		var header = ""
-
-		var firstHeaderSectionIndex = content.indexOf("---");
-		var lastHeaderSectionIndex = content.indexOf("---");
-
-
-		if(firstHeaderSectionIndex >= 0 && lastHeaderSectionIndex >= 0)
-		{
-			header = content.substring(0, lastHeaderSectionIndex);
-			console.log(header);
-
-			const startPosition = header.indexOf(key);
-			if(startPosition < 0)
-			{
-				header += key + ": " + value;
-				return header + ;
-			}
+	private parseFrontmatterProperties(contents: string): Record<string, string> {
+		const frontmatterRegex = /^---\s*\n([\s\S]+?)\n---\s*\n/;
+		const match = contents.match(frontmatterRegex);
 	
-			const endPosition = header.indexOf("\n", startPosition);
-			if(endPosition < 0)
-			{
-				return header;
-			}
+		if (match && match.length > 1) {
+			const frontmatterContent = match[1];
+			const properties: Record<string, any> = {};
+				
+			// Split frontmatter content into lines
+			const lines = frontmatterContent.split('\n');
 	
-			header = header.substring(0, startPosition) + ": " + value + header.substring(endPosition);
+			// Parse each line for key-value pairs
+			lines.forEach(line => {
+				const keyValueMatch = line.match(/^\s*([^:]+?)\s*:\s*(.+?)\s*$/);
+				if (keyValueMatch && keyValueMatch.length === 3) {
+					const key = keyValueMatch[1].trim();
+					const value = keyValueMatch[2].trim();
+					properties[key] = value;
+				}
+			});
+	
+			return properties;
+		} 
+		else {
+			return {};
 		}
+	}
 
-		return header;
+	private updateFrontmatter(contents: string, updatedProperties: Record<string, string>): string {
+		const frontmatterRegex = /^---\s*\n([\s\S]+?)\n---\s*\n/;
+		const match = contents.match(frontmatterRegex);
+
+		if (match && match.length > 1) {
+			const frontmatterContent = match[1];
+			let updatedFrontmatterContent = frontmatterContent;
+
+			// Parse each property in updatedProperties and update the frontmatter content
+			Object.keys(updatedProperties).forEach(key => {
+				const value = updatedProperties[key];
+				const regex = new RegExp(`^\\s*${key}\\s*:\\s*.+?\\s*$`, 'm');
+				updatedFrontmatterContent = updatedFrontmatterContent.replace(regex, `${key}: ${value}`);
+			});
+
+			// Replace the old frontmatter section with the updated one
+			const updatedContents = contents.replace(frontmatterRegex, `---\n${updatedFrontmatterContent.trim()}\n---\n`);
+
+			return updatedContents;
+		} else {
+			// If no frontmatter section found, add a new one with the updated properties
+			const frontmatterContent = Object.entries(updatedProperties).map(([key, value]) => `${key}: ${value}`).join('\n');
+			const newFrontmatter = `---\n${frontmatterContent}\n---\n${contents.trim()}`;
+			return newFrontmatter;
+		}
 	}	
+
+	async loadSettings() {
+        this.settings = Object.assign({}, await this.loadData());
+    }
+
+    async saveSettings() {
+        await this.saveData(this.settings);
+    }
 } 
+
+class ExamplePluginSettingsTab extends PluginSettingTab {
+    plugin: ExamplePlugin;
+
+    constructor(app: App, plugin: ExamplePlugin) {
+		super(app, plugin);
+        this.plugin = plugin;
+    }
+
+    display() {
+		const {containerEl} = this;
+
+        containerEl.empty();
+
+		new Setting(this.containerEl)
+		.setName('Author')
+		.setDesc('Name of the author')
+		.addText(text => text
+			.setPlaceholder('Enter author name')
+			.setValue(this.plugin.settings.author)
+			.onChange(async (value) => {
+				this.plugin.settings.author = value;
+				await this.plugin.saveSettings();
+			}));
+
+		new Setting(this.containerEl)
+			.setName('Last Modified Date')
+			.setDesc('Date when the document was last modified')
+			.addText(text => text
+				.setPlaceholder('Enter last modified date')
+				.setValue(this.plugin.settings.lastModifiedDate)
+				.onChange(async (value) => {
+					this.plugin.settings.lastModifiedDate = value;
+					await this.plugin.saveSettings();
+				}));
+    }
+}
+
+interface ExamplePluginSettings {
+    author: string;
+    lastModifiedDate: string;
+}
