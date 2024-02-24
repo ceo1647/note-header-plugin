@@ -4,13 +4,20 @@ export default class ExamplePlugin extends Plugin {
 	isProcessing : boolean;
 	settings: ExamplePluginSettings;
 
-	onload() : void {
+	async onload() {
 
 		this.addSettingTab(new ExamplePluginSettingsTab(this.app, this));
+
+		await this.loadSettings();
 
 		this.app.workspace.on('editor-change', editor => {
 
 			if(this.isProcessing)
+			{
+				return;
+			}
+
+			if(!this.settings.author)
 			{
 				return;
 			}
@@ -30,19 +37,20 @@ export default class ExamplePlugin extends Plugin {
 					headerRecord = this.parseFrontmatterProperties(header);
 				}
 
-				if(headerRecord["author"] == "Vladimir" 
-				   && headerRecord["last_edited"] == new Date().toLocaleDateString())
+				const currentDate = new Date().toLocaleDateString();
+
+				if(headerRecord["author"] == this.settings.author
+				   && headerRecord["last_edited"] == currentDate)
 				{
 					return;
 				}
 
-				headerRecord["author"] = "Vladimir";
-				headerRecord["last_edited"] = new Date().toLocaleDateString();
+				headerRecord["author"] = this.settings.author;
+				headerRecord["last_edited"] = currentDate;
 
 				this.isProcessing = true;
 				this.app.vault.process(activeFile, data => {
-					console.log("5");		
-					
+
 					data = this.updateFrontmatter(data, headerRecord);
 					
 					return data;
@@ -126,40 +134,34 @@ class ExamplePluginSettingsTab extends PluginSettingTab {
     plugin: ExamplePlugin;
 
     constructor(app: App, plugin: ExamplePlugin) {
-		super(app, plugin);
+        super(app, plugin);
         this.plugin = plugin;
     }
 
-    display() {
-		const {containerEl} = this;
+    display(): void {
+        let { containerEl } = this;
 
         containerEl.empty();
+        containerEl.createEl('h2', { text: 'Note header manager settings' });
 
-		new Setting(this.containerEl)
-		.setName('Author')
-		.setDesc('Name of the author')
-		.addText(text => text
-			.setPlaceholder('Enter author name')
-			.setValue(this.plugin.settings.author)
-			.onChange(async (value) => {
-				this.plugin.settings.author = value;
-				await this.plugin.saveSettings();
-			}));
+		console.log("start");		
+		console.log(this.plugin.settings.author);		
+		console.log("end");
 
-		new Setting(this.containerEl)
-			.setName('Last Modified Date')
-			.setDesc('Date when the document was last modified')
-			.addText(text => text
-				.setPlaceholder('Enter last modified date')
-				.setValue(this.plugin.settings.lastModifiedDate)
+        new Setting(containerEl)
+            .setName('Author')
+            .setDesc("Name of the author")
+            .addText(text => text
+                .setValue(this.plugin.settings.author)
 				.onChange(async (value) => {
-					this.plugin.settings.lastModifiedDate = value;
+					console.log(value);
+
+                    this.plugin.settings.author = value;
 					await this.plugin.saveSettings();
-				}));
+                }));
     }
 }
 
-interface ExamplePluginSettings {
-    author: string;
-    lastModifiedDate: string;
+class ExamplePluginSettings {
+	author : string;
 }
